@@ -42,7 +42,7 @@ type Hysteria2Option struct {
 	Server         string     `proxy:"server"`
 	Port           int        `proxy:"port,omitempty"`
 	Ports          string     `proxy:"ports,omitempty"`
-	HopInterval    string     `proxy:"hop-interval,omitempty"`
+	HopInterval    int        `proxy:"hop-interval,omitempty"`
 	Up             string     `proxy:"up,omitempty"`
 	Down           string     `proxy:"down,omitempty"`
 	Password       string     `proxy:"password,omitempty"`
@@ -189,7 +189,7 @@ func NewHysteria2(option Hysteria2Option) (*Hysteria2, error) {
 		ServerAddress:      M.ParseSocksaddr(addr),
 		PacketListener:     outbound.dialer,
 		QuicDialer: qtls.QuicDialerFunc(func(ctx context.Context, addr string, dialer qtls.PacketDialer, tlsCfg *tls.Config, cfg *quic.Config, early bool) (net.PacketConn, *quic.Conn, error) {
-			err := echConfig.ClientHandle(ctx, tlsCfg)
+			err = echConfig.ClientHandle(ctx, tlsCfg)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -197,9 +197,10 @@ func NewHysteria2(option Hysteria2Option) (*Hysteria2, error) {
 		}),
 	}
 
+	var ranges utils.IntRanges[uint16]
 	var serverPorts []uint16
 	if option.Ports != "" {
-		ranges, err := utils.NewUnsignedRanges[uint16](option.Ports)
+		ranges, err = utils.NewUnsignedRanges[uint16](option.Ports)
 		if err != nil {
 			return nil, err
 		}
@@ -208,21 +209,12 @@ func NewHysteria2(option Hysteria2Option) (*Hysteria2, error) {
 			return true
 		})
 		if len(serverPorts) > 0 {
-			hopRange, err := utils.NewUnsignedRange[uint64](option.HopInterval)
-			if err != nil {
-				return nil, err
+			if option.HopInterval == 0 {
+				option.HopInterval = defaultHopInterval
+			} else if option.HopInterval < minHopInterval {
+				option.HopInterval = minHopInterval
 			}
-			start, end := hopRange.Start(), hopRange.End()
-			if start == 0 {
-				start = defaultHopInterval
-			} else if start < minHopInterval {
-				start = minHopInterval
-			}
-			if end < start {
-				end = start
-			}
-			clientOptions.HopInterval = time.Duration(start) * time.Second
-			clientOptions.HopIntervalMax = time.Duration(end) * time.Second
+			clientOptions.HopInterval = time.Duration(option.HopInterval) * time.Second
 			clientOptions.ServerPorts = serverPorts
 		}
 	}
