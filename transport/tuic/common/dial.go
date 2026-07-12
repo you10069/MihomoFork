@@ -16,36 +16,42 @@ type PacketDialer interface {
 	ListenPacket(ctx context.Context, network, address string, rAddrPort netip.AddrPort) (net.PacketConn, error)
 }
 
-func DialQuic(ctx context.Context, address string, opts []dialer.Option, pDialer PacketDialer, tlsConf *tls.Config, conf *quic.Config, early bool) (net.PacketConn, *quic.Conn, error) {
-	d := dialer.NewDialer(
-		dialer.WithOptions(opts...),
-		dialer.WithNetDialer(dialer.NetDialerFunc(func(ctx context.Context, network, address string) (net.Conn, error) {
-			addrPort, err := netip.ParseAddrPort(address) // the dialer will resolve the domain to ip
-			if err != nil {
-				return nil, err
-			}
-			udpAddr := net.UDPAddrFromAddrPort(addrPort)
-			packetConn, err := pDialer.ListenPacket(ctx, "udp", "", udpAddr.AddrPort())
-			if err != nil {
-				return nil, err
-			}
-			transport := quic.Transport{Conn: packetConn}
-			transport.SetCreatedConn(true) // auto close conn
-			transport.SetSingleUse(true)   // auto close transport
+type netDialerFunc func(ctx context.Context, network, address string) (net.Conn, error)
 
-			var quicConn *quic.Conn
-			if early {
-				quicConn, err = transport.DialEarly(ctx, udpAddr, tlsConf, conf)
-			} else {
-				quicConn, err = transport.Dial(ctx, udpAddr, tlsConf, conf)
-			}
-			if err != nil {
-				_ = packetConn.Close()
-				return nil, err
-			}
-			return quicNetConn{Conn: quicConn, pc: packetConn}, nil
-		})),
-	)
+func (f netDialerFunc) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	return f(ctx, network, address)
+}
+
+func DialQuic(ctx context.Context, address string, opts []dialer.Option, pDialer PacketDialer, tlsConf *tls.Config, conf *quic.Config, early bool) (net.PacketConn, *quic.Conn, error) {
+	dialOptions := make([]dialer.Option, 0, len(opts)+1)
+	dialOptions = append(dialOptions, opts...)
+	dialOptions = append(dialOptions, dialer.WithNetDialer(netDialerFunc(func(ctx context.Context, network, address string) (net.Conn, error) {
+		addrPort, err := netip.ParseAddrPort(address) // the dialer will resolve the domain to ip
+		if err != nil {
+			return nil, err
+		}
+		udpAddr := net.UDPAddrFromAddrPort(addrPort)
+		packetConn, err := pDialer.ListenPacket(ctx, "udp", "", udpAddr.AddrPort())
+		if err != nil {
+			return nil, err
+		}
+		transport := quic.Transport{Conn: packetConn}
+		transport.SetCreatedConn(true) // auto close conn
+		transport.SetSingleUse(true)   // auto close transport
+
+		var quicConn *quic.Conn
+		if early {
+			quicConn, err = transport.DialEarly(ctx, udpAddr, tlsConf, conf)
+		} else {
+			quicConn, err = transport.Dial(ctx, udpAddr, tlsConf, conf)
+		}
+		if err != nil {
+			_ = packetConn.Close()
+			return nil, err
+		}
+		return quicNetConn{Conn: quicConn, pc: packetConn}, nil
+	})))
+	d := dialer.NewDialer(dialOptions...)
 	c, err := d.DialContext(ctx, "udp", address)
 	if err != nil {
 		return nil, nil, err
