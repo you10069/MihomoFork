@@ -36,7 +36,7 @@ type SudokuOption struct {
 	AEADMethod         string                 `proxy:"aead-method,omitempty"`
 	PaddingMin         *int                   `proxy:"padding-min,omitempty"`
 	PaddingMax         *int                   `proxy:"padding-max,omitempty"`
-	TableType          string                 `proxy:"table-type,omitempty"` // "prefer_ascii" or "prefer_entropy"
+	TableType          string                 `proxy:"table-type,omitempty"` // "prefer_ascii", "prefer_entropy", or directional "up_ascii_down_entropy"/"up_entropy_down_ascii"
 	EnablePureDownlink *bool                  `proxy:"enable-pure-downlink,omitempty"`
 	HTTPMask           *bool                  `proxy:"http-mask,omitempty"`
 	HTTPMaskMode       string                 `proxy:"http-mask-mode,omitempty"`      // "legacy" (default), "stream", "poll", "auto", "ws"
@@ -54,7 +54,7 @@ type SudokuHTTPMaskOptions struct {
 	Mode      string `proxy:"mode,omitempty"`
 	TLS       bool   `proxy:"tls,omitempty"`
 	Host      string `proxy:"host,omitempty"`
-	PathRoot  string `proxy:"path_root,omitempty"`
+	PathRoot  string `proxy:"path-root,omitempty"`
 	Multiplex string `proxy:"multiplex,omitempty"`
 }
 
@@ -66,7 +66,7 @@ func (s *Sudoku) DialContext(ctx context.Context, metadata *C.Metadata) (_ C.Con
 	}
 
 	muxMode := normalizeHTTPMaskMultiplex(cfg.HTTPMaskMultiplex)
-	if muxMode == "on" && !cfg.DisableHTTPMask && httpTunnelModeEnabled(cfg.HTTPMaskMode) {
+	if muxMode == "on" {
 		stream, muxErr := s.dialMultiplex(ctx, cfg.TargetAddress)
 		if muxErr == nil {
 			return NewConn(stream, s), nil
@@ -223,18 +223,18 @@ func NewSudoku(option SudokuOption) (*Sudoku, error) {
 	}
 
 	outbound := &Sudoku{
-		Base: &Base{
-			name:   option.Name,
-			addr:   baseConf.ServerAddress,
-			tp:     C.Sudoku,
-			pdName: option.ProviderName,
-			udp:    true,
-			tfo:    option.TFO,
-			mpTcp:  option.MPTCP,
-			iface:  option.Interface,
-			rmark:  option.RoutingMark,
-			prefer: option.IPVersion,
-		},
+		Base: NewBase(BaseOption{
+			Name:         option.Name,
+			Addr:         baseConf.ServerAddress,
+			Type:         C.Sudoku,
+			ProviderName: option.ProviderName,
+			UDP:          true,
+			TFO:          option.TFO,
+			MPTCP:        option.MPTCP,
+			Interface:    option.Interface,
+			RoutingMark:  option.RoutingMark,
+			Prefer:       option.IPVersion,
+		}),
 		option:   &option,
 		baseConf: baseConf,
 	}
